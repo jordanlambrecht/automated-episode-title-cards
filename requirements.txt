@@ -1,3 +1,7 @@
 ffmpy
 rich
 pillow
+numpy
+setuptools
+language_tool_python
+pyyaml

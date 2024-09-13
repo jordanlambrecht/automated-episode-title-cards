@@ -1,49 +1,62 @@
 from PIL import Image, ImageEnhance
+import numpy as np
+import logging
+from pathlib import Path
 
-def enhance_image(image_path: str):
-    image = Image.open(image_path)
+logger = logging.getLogger(__name__)
 
-    enhancer = ImageEnhance.Contrast(image)
-    image = enhancer.enhance(1.2) # Slightly boost contrast
+def enhance_image(image_path: Path):
+    """Enhance the image's contrast, color, brightness, and sharpness."""
+    try:
+        image = Image.open(image_path)
 
-    enhancer = ImageEnhance.Color(image)
-    image = enhancer.enhance(1.1)  # Slightly boost saturation
+        enhancer = ImageEnhance.Contrast(image)
+        image = enhancer.enhance(1.2)
 
-    enhancer = ImageEnhance.Brightness(image)
-    image = enhancer.enhance(1.05)  # Slightly boost brightness
+        enhancer = ImageEnhance.Color(image)
+        image = enhancer.enhance(1.1)
 
-    enhancer = ImageEnhance.Sharpness(image)
-    image = enhancer.enhance(1.1)  # Slightly boost sharpness
+        enhancer = ImageEnhance.Brightness(image)
+        image = enhancer.enhance(1.05)
 
-    image.save(image_path)
+        enhancer = ImageEnhance.Sharpness(image)
+        image = enhancer.enhance(1.1)
 
+        image.save(image_path)
+    except Exception as e:
+        logger.error(f"Error enhancing image {image_path}: {e}")
 
-def resize_image_to_1080p(image_path: str):
+def resize_image_to_target_dimensions(image_path: Path, aspect_ratio: str):
     """
-    Resizes the image to have a height of 1080px while maintaining the aspect ratio.
+    Resizes the image to the target dimensions based on the aspect ratio.
 
     :param image_path: Path to the input image that needs resizing.
+    :param aspect_ratio: The desired aspect ratio ("16:9" or "4:3").
     """
+    # Define target dimensions based on aspect ratio
+    if aspect_ratio == "16:9":
+        target_width = 1920
+        target_height = 1080
+    elif aspect_ratio == "4:3":
+        target_width = 1440
+        target_height = 1080
+    else:
+        # Default to 16:9 if unknown aspect ratio
+        target_width = 1920
+        target_height = 1080
+
     # Open the image
     img = Image.open(image_path)
 
-    # Set the target height to 1080px
-    target_height = 1080
-
-    # Calculate the aspect ratio and determine the new width based on the target height
-    aspect_ratio = img.width / img.height
-    new_width = int(target_height * aspect_ratio)
-
-    # Resize the image to the new width and height (1080px)
-    resized_img = img.resize((new_width, target_height), Image.LANCZOS)
+    # Resize the image to the target dimensions
+    resized_img = img.resize((target_width, target_height), Image.LANCZOS)
 
     # Save the resized image, overwriting the original file
     resized_img.save(image_path)
 
-
-def detect_and_remove_letterbox(image_path: str, output_path: str, aspect_ratio: str = "16:9", threshold=20):
+def detect_and_remove_letterbox(image_path: Path, output_path: Path, aspect_ratio: str = "16:9", threshold=20):
     """
-    Detects and removes letterbox (black bars) from an image and adjusts the image to the desired aspect ratio.
+    Detects and removes letterbox (black bars) from an image and crops it to the desired aspect ratio.
 
     :param image_path: Path to the input image.
     :param output_path: Path to save the cropped image without letterboxes.
@@ -52,49 +65,45 @@ def detect_and_remove_letterbox(image_path: str, output_path: str, aspect_ratio:
     """
     # Open the image
     img = Image.open(image_path)
+    img_array = np.array(img.convert("L"))
 
-    # Convert to grayscale
-    gray_img = img.convert("L")
+    # Create a mask where pixels brighter than the threshold are considered content
+    mask = img_array > threshold
+    coords = np.argwhere(mask)
 
-    # Get the pixel data
-    pixels = gray_img.load()
+    if coords.size == 0:
+        logger.warning(f"\nNo content detected in image {image_path}. Skipping letterbox removal.")
+        return
 
-    width, height = img.size
+    y_min, x_min = coords.min(axis=0)
+    y_max, x_max = coords.max(axis=0) + 1  # slices are exclusive at the top
 
-    # Find the top and bottom bounds
-    top = 0
-    bottom = height - 1
+    # Crop the image to content area
+    cropped_img = img.crop((x_min, y_min, x_max, y_max))
 
-    # Detect top letterbox
-    for y in range(height):
-        row_brightness = [pixels[x, y] for x in range(width)]
-        if max(row_brightness) > threshold:
-            top = y
-            break
-
-    # Detect bottom letterbox
-    for y in range(height - 1, -1, -1):
-        row_brightness = [pixels[x, y] for x in range(width)]
-        if max(row_brightness) > threshold:
-            bottom = y
-            break
-
-    # Crop the image to remove letterboxes
-    cropped_img = img.crop((0, top, width, bottom))
-
-    # Enforce the desired aspect ratio
+    # Now enforce the desired aspect ratio
     cropped_width, cropped_height = cropped_img.size
-    desired_aspect = 16 / 9 if aspect_ratio == "16:9" else 4 / 3
-    current_aspect = cropped_width / cropped_height
+    if aspect_ratio == "16:9":
+        desired_ratio = 16 / 9
+    elif aspect_ratio == "4:3":
+        desired_ratio = 4 / 3
+    else:
+        desired_ratio = cropped_width / cropped_height  # Keep original aspect ratio if unknown
 
-    if current_aspect > desired_aspect:  # Image is too wide, crop width
-        new_width = int(cropped_height * desired_aspect)
-        offset = (cropped_width - new_width) // 2
-        cropped_img = cropped_img.crop((offset, 0, offset + new_width, cropped_height))
-    elif current_aspect < desired_aspect:  # Image is too tall, crop height
-        new_height = int(cropped_width / desired_aspect)
-        offset = (cropped_height - new_height) // 2
-        cropped_img = cropped_img.crop((0, offset, cropped_width, offset + new_height))
+    current_ratio = cropped_width / cropped_height
 
-    # Save the cropped image with the correct aspect ratio
+    if abs(current_ratio - desired_ratio) > 0.01:
+        # Adjust the cropping to achieve the desired aspect ratio
+        if current_ratio > desired_ratio:
+            # Crop width
+            new_width = int(cropped_height * desired_ratio)
+            offset = (cropped_width - new_width) // 2
+            cropped_img = cropped_img.crop((offset, 0, offset + new_width, cropped_height))
+        else:
+            # Crop height
+            new_height = int(cropped_width / desired_ratio)
+            offset = (cropped_height - new_height) // 2
+            cropped_img = cropped_img.crop((0, offset, cropped_width, offset + new_height))
+
+    # Save the cropped image
     cropped_img.save(output_path)

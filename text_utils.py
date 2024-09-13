@@ -1,129 +1,125 @@
 from PIL import Image, ImageDraw, ImageFont
 import textwrap
-import logging
 
-def add_episode_title(image_path: str, episode_title: str, aspect_ratio: str, title_font_path: str, season_font_path: str = None, season_episode_text: str = None, line_spacing: int = 10, title_spacing: int = 30, bottom_margin: int = 100):
-    """
-    Add episode title as text centered in the lower third of the image, with an option to include the season and episode text.
-    Overlay a gradient behind the text based on the aspect ratio.
-    
-    :param image_path: Path to the input image.
-    :param episode_title: The text to add (episode title).
-    :param aspect_ratio: Aspect ratio to determine the gradient overlay (either "16:9" or "4:3").
-    :param title_font_path: Path to the font file for the episode title.
-    :param season_font_path: Path to the font file for the season/episode text (optional).
-    :param season_episode_text: Optional text to display above the episode title (e.g., "Season 01 - Episode 01").
-    :param line_spacing: Extra vertical space between lines.
-    :param title_spacing: Extra space between season/episode text and title.
-    :param bottom_margin: Minimum margin from the bottom of the image to the text.
-    """
-    # Open the image
-    img = Image.open(image_path)
-    
-    # Load the appropriate gradient based on the aspect ratio
-    if aspect_ratio not in ["16:9", "4:3"]:
-        print(f"Invalid aspect ratio: {aspect_ratio}. Defaulting to '16:9'.")
-        aspect_ratio = "16:9"
-        
-    gradient_path = f"./gradients/gradient_{aspect_ratio.replace(':', 'x')}_bottom.png"
-    try:
-        gradient = Image.open(gradient_path)
-    except IOError:
-        print(f"Gradient file '{gradient_path}' not found.")
-        return
+from pathlib import Path
+from log_config import logger
 
-    # Resize the gradient to match the image width
-    gradient = gradient.resize((img.width, gradient.height))
 
-    # Paste the gradient onto the original image (lower third)
-    img.paste(gradient, (0, img.height - gradient.height), gradient)
 
-    # Set up drawing context
-    draw = ImageDraw.Draw(img)
 
-    # Get the size of the image
+
+
+# Helper Function to Load and Apply Gradient
+def load_and_apply_gradient(img: Image.Image, aspect_ratio: str) -> Image.Image:
+    """Loads and applies the gradient overlay based on the aspect ratio."""
     width, height = img.size
+    gradients_dir = Path(__file__).parent / "gradients"
+    gradient_filename = f"gradient_{aspect_ratio.replace(':', 'x')}_bottom.png"
+    gradient_path = gradients_dir / gradient_filename
 
-    # Dynamically calculate initial font size based on image size (e.g., 12% of image height for title, 7% for season/episode)
-    title_font_size = max(int(height * 0.12), 60)  # Set a minimum of 60 for readability
-    season_font_size = max(int(title_font_size / 1.8), 40)  # Ensure season/episode text remains readable
-
-    # Load the user-selected fonts
     try:
-        title_font = ImageFont.truetype(title_font_path, title_font_size)
-        print(f"Using title font: {title_font_path}")  # Add this for debugging
+        with Image.open(gradient_path) as gradient:
+            gradient = gradient.resize((width, gradient.height))
+            img.paste(gradient, (0, height - gradient.height), gradient)
+            logger.debug(f"Applied gradient: {gradient_filename}")
     except IOError:
-        print(f"Title font file '{title_font_path}' not found. Using default font.")
-        title_font = ImageFont.load_default()
+        logger.warning(f"Gradient file '{gradient_filename}' not found. Skipping gradient overlay.")
 
-    if season_font_path and season_episode_text:
-        try:
-            season_font = ImageFont.truetype(season_font_path, season_font_size)
-            print(f"Using season font: {season_font_path}")  # Add this for debugging
-        except IOError:
-            print(f"Season font file '{season_font_path}' not found. Using default font.")
-            season_font = ImageFont.load_default()
-    else:
-        season_font = None
+    return img
 
-    # Define the text color (white) and drop shadow color (subtle dark gray)
-    title_color = (255, 255, 255)
-    season_color = (255, 255, 255)
-    shadow_color = (0, 0, 0, 150)  # Semi-transparent black for subtle shadow
+# Helper Function to Load Fonts
+def load_font(font_name: str, font_size: int, fallback: bool = True) -> ImageFont.FreeTypeFont:
+    """Loads the specified font, falling back to default if necessary."""
+    fonts_dir = Path(__file__).parent / "fonts"
+    font_path = fonts_dir / font_name
+    try:
+        return ImageFont.truetype(str(font_path), font_size)
+    except IOError:
+        if fallback:
+            logger.warning(f"Font '{font_name}' not found. Using default font.")
+            return ImageFont.load_default()
+        else:
+            raise
 
-    # Max width for the text (40% of the image width), but ensure a minimum of 30% width
-    max_width_pixels = max(width * 0.6, 300)  # Ensure a minimum width of 300 pixels
+# Helper Function to Draw Text with Drop Shadow
+def draw_text_with_shadow(draw: ImageDraw.Draw, position: tuple, text: str, font: ImageFont.FreeTypeFont, text_color: tuple, shadow_color: tuple):
+    """Draws text with a drop shadow."""
+    x, y = position
+    # Draw shadow first
+    draw.text((x + 2, y + 2), text, font=font, fill=shadow_color, anchor="ms")
+    # Draw actual text
+    draw.text((x, y), text, font=font, fill=text_color, anchor="ms")
 
-    # Use textwrap to break lines within the width limit
-    wrapped_lines = textwrap.wrap(episode_title, width=int(max_width_pixels // title_font_size * 1.5))
+# Main Function
+def add_episode_title(
+    image_path: Path,
+    episode_title: str,
+    aspect_ratio: str,
+    title_font_name: str,
+    season_font_name: str = None,
+    season_episode_text: str = None,
+    line_spacing: int = 40,
+    title_spacing: int = 30,  # Space between season text and title text
+    bottom_margin: int = 10
+):
+    """
+    Add episode title and optional season/episode text to the image, overlaying a gradient based on aspect ratio.
+    This function first writes the episode title and calculates the space taken,
+    then writes the season/episode text above it.
+    """
+    try:
+        with Image.open(image_path) as img:
+            width, height = img.size
 
-    # Calculate total title text height (multiple lines + spacing)
-    total_title_height = sum([draw.textbbox((0, 0), line, font=title_font)[3] for line in wrapped_lines])
-    total_title_height += line_spacing * (len(wrapped_lines) - 1)  # Add spacing between lines
+            # Apply gradient
+            img = load_and_apply_gradient(img, aspect_ratio)
 
-    # If season_episode_text is provided, calculate its height
-    if season_episode_text and season_font:
-        season_bbox = draw.textbbox((0, 0), season_episode_text, font=season_font)
-        season_width = season_bbox[2] - season_bbox[0]
-        season_height = season_bbox[3] - season_bbox[1]
-    else:
-        season_width = 0
-        season_height = 0
+            # Set up drawing context
+            draw = ImageDraw.Draw(img)
 
-    # Calculate the start position to vertically center the text in the lower third
-    lower_third_height = height // 3
-    total_text_height = total_title_height + season_height + title_spacing  # Include both title and season/episode text
-    text_y = height - lower_third_height + (lower_third_height - total_text_height) // 2
+            # Dynamically calculate initial font sizes based on image size
+            title_font_size = max(int(height * 0.12), 60)  # 12% of image height, min 60
+            season_font_size = max(int(title_font_size * 0.333), 40)
+            line_spacing = min(int(title_font_size * 0.25), 25)
+            title_spacing = min(int(season_font_size * .75), 50)
+            # Load title font and season font
+            title_font = load_font(title_font_name, title_font_size)
+            season_font = load_font(season_font_name, season_font_size) if season_font_name and season_episode_text else None
 
-    # Ensure there's a margin of at least 50px from the bottom of the image
-    if text_y + total_text_height + bottom_margin > height:
-        text_y = height - total_text_height - bottom_margin
+            # Define text and shadow colors
+            title_color = (255, 255, 255)
+            season_color = (255, 255, 255)
+            shadow_color = (0, 0, 0, 150)  # Semi-transparent black
 
-    # Draw the season/episode text if provided, centered above the title
-    if season_episode_text and season_font:
-        season_x = (width - season_width) // 2  # Center the season text horizontally
-        draw.text((season_x + 2, text_y + 2), season_episode_text, font=season_font, fill=shadow_color)  # Drop shadow
-        draw.text((season_x, text_y), season_episode_text, font=season_font, fill=season_color)  # Actual text
-        text_y += season_height + title_spacing  # Add extra space below the season text
+            # Max width for the text (60% of the image width)
+            max_width_pixels = max(width * 0.6, 300)
 
-    # Draw each line of title text with a subtle drop shadow
-    for line in wrapped_lines:
-        # Get the size of each line
-        text_bbox = draw.textbbox((0, 0), line, font=title_font)
-        text_width = text_bbox[2] - text_bbox[0]
-        text_height = text_bbox[3] - text_bbox[1]
+            # Wrap the episode title text
+            chars_per_line = int(max_width_pixels / (title_font_size * 0.6))
+            wrapped_lines = textwrap.wrap(episode_title, width=chars_per_line)
 
-        # Calculate position for centering the line
-        text_x = (width - text_width) // 2
+            # Start drawing from the bottom of the image, moving upwards
+            text_y = height - bottom_margin
 
-        # Draw the drop shadow first
-        draw.text((text_x + 2, text_y + 2), line, font=title_font, fill=shadow_color)
+            # Draw episode title lines with drop shadows, starting from the bottom
+            for line in reversed(wrapped_lines):  # Reverse order to start from bottom up
+                text_x = width // 2
+                line_height = draw.textbbox((0, 0), line, font=title_font)[3]
+                text_y -= line_height + line_spacing  # Move upwards
+                draw_text_with_shadow(draw, (text_x, text_y), line, title_font, title_color, shadow_color)
 
-        # Draw the actual text
-        draw.text((text_x, text_y), line, font=title_font, fill=title_color)
+            # Now, calculate the total height used by the title text
+            total_title_height = sum([draw.textbbox((0, 0), line, font=title_font)[3] for line in wrapped_lines])
+            total_title_height += line_spacing * (len(wrapped_lines) - 1)
 
-        # Move to the next line with spacing
-        text_y += text_height + line_spacing
+            # Calculate the new Y-position above the title for the season text
+            if season_episode_text and season_font:
+                text_y -= (season_font_size*2 + title_spacing*2)
+                season_x = width // 2
+                draw_text_with_shadow(draw, (season_x, text_y), season_episode_text, season_font, season_color, shadow_color)
 
-    # Save the modified image
-    img.save(image_path)
+            # Save the modified image
+            img.save(image_path)
+
+    except Exception as e:
+        logger.error(f"Error adding title to image {image_path}: {e}")
