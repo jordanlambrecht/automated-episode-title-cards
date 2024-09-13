@@ -1,0 +1,9 @@
+logging:
+  log_file: "screenshot_maker_log.log"
+  max_log_size: 5242880 # 5 MB in bytes
+  backup_count: 5
+  console_log_level: "INFO"
+  log_file_log_level: "DEBUG"
+
+features:
+  check_grammar: true
