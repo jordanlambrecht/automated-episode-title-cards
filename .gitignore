@@ -3,7 +3,7 @@
 /source
 gradients.psd
 .DS_Store
-/__pycache__
+**/__pycache__
 screenshot_maker_log.log
 .vscode
 log
