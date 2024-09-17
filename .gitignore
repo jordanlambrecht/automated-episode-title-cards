@@ -6,3 +6,5 @@ gradients.psd
 /__pycache__
 screenshot_maker_log.log
 .vscode
+log
+gradients.psd
