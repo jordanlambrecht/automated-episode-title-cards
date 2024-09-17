@@ -5,3 +5,4 @@ numpy
 setuptools
 language_tool_python
 pyyaml
+questionary

@@ -1,30 +1,66 @@
-from load_config import config
+from .load_config import config  # Import config directly
 import re
 import subprocess
-
 from pathlib import Path
 from typing import Tuple
-
-from log_config import logger
+from .log_config import log_message  # Import log_message for centralized logging
 import language_tool_python
-
 
 tool = language_tool_python.LanguageTool('en-US')
 
+spelling_rule_ids = [
+    'MORFOLOGIK_RULE_EN_US',  # Spelling error rule ID for American English
+    'MORFOLOGIK_RULE_EN_GB',  # British English spelling rule
+    'MORFOLOGIK_RULE_EN_CA',  # Canadian English spelling rule
+    'MORFOLOGIK_RULE_EN_AU',  # Australian English spelling rule
+    'MORFOLOGIK_RULE_EN_NZ',  # New Zealand English spelling rule
+    # Add other spelling rules if needed for different languages
+]
+
+
+def load_fonts_from_directory(fonts_dir: str) -> list:
+    """
+    Load all fonts from the specified directory and return a list of file names.
+    """
+    fonts = []
+    fonts_path = Path(fonts_dir)
+
+    if not fonts_path.exists():
+        log_message.error(f"Font directory '{fonts_dir}' does not exist.")
+        return fonts
+
+    for font_file in fonts_path.iterdir():
+        if font_file.suffix.lower() in ['.ttf', '.otf']:  # Only include TTF and OTF fonts
+            fonts.append(font_file.name)
+
+    if not fonts:
+        log_message.warning(f"No fonts found in the specified directory: {fonts_dir}")
+
+    else:
+        log_message.debug(f"Loaded fonts: {fonts}")
+
+    return fonts
+
 # Function to check and correct grammar in the episode title
 def correct_grammar(text: str) -> str:
-    """Corrects the grammar of a given text and logs corrections if needed."""
+    """Corrects the grammar of a given text and logs corrections if needed, excluding spelling."""
 
-    if config['features'].get('check_grammar', False):
+    if config['grammar'].get('check_grammar', False):
+        # Run the grammar check
         matches = tool.check(text)
+
+        # Filter out matches that correspond to pure spelling errors (but keep punctuation/grammar corrections)
+        matches = [match for match in matches if match.ruleId not in spelling_rule_ids]
+
+        # Correct the grammar using filtered matches
         corrected_text = language_tool_python.utils.correct(text, matches)
 
         if corrected_text == text:
-            logger.debug("Title's grammar is okay.")
+            log_message.debug("Title's grammar is okay.")
         else:
-            logger.info(f"Corrected title's grammar from '{text}' to '{corrected_text}'")
+            log_message.info(f"Corrected title's grammar from '{text}' to '{corrected_text}'")
     else:
-        logger.debug("Grammar checking is disabled.")
+        log_message.debug("Grammar checking is disabled.")
 
     return corrected_text
 
@@ -37,7 +73,6 @@ def clean_episode_title(title: str) -> str:
         title = re.sub(r'\([^\)]*\)', '', title)
 
         # Remove common video quality tags and other release info
-        # This regex targets typical tags like WEB-DL, BluRay, x264, h264, etc.
         title = re.sub(
             r'\b(WEB[-\. ]?DL|WEB[-\. ]?Rip|Blu[-\. ]?Ray|BDRip|HDRip|HDTV|DVDRip|x264|x265|h\.?264|h\.?265|HEVC|AAC2?\.?0|AAC5\.1|EAC3|DDP5\.1|DD5\.1|Atmos|TrueHD)\b',
             '',
@@ -45,7 +80,7 @@ def clean_episode_title(title: str) -> str:
             flags=re.IGNORECASE
         )
 
-        # Remove release group names, which are often at the end after a dash
+        # Remove release group names
         title = re.sub(r'[-_.]\s*[A-Za-z0-9]+$', '', title)
 
         # Replace underscores and periods with spaces
@@ -56,7 +91,7 @@ def clean_episode_title(title: str) -> str:
 
         # Trim leading and trailing spaces and punctuation
         title = title.strip(' -.')
-        
+
         title = correct_grammar(title)
 
     return title.strip()
@@ -90,10 +125,10 @@ def get_video_duration(video_path: Path) -> float:
         if duration_str:
             return float(duration_str)
         else:
-            logger.error(f"No duration found for {video_path}")
+            log_message.error("No duration found for {video_path}")
             return None
     except Exception as e:
-        logger.error(f"Error retrieving duration for {video_path}: {e}")
+        log_message.error("Error retrieving duration for {video_path}: {e}")
         return None
 
 def extract_episode_metadata(video_path: Path) -> Tuple[str, str, str, str]:
@@ -121,6 +156,6 @@ def extract_episode_metadata(video_path: Path) -> Tuple[str, str, str, str]:
         episode_title = clean_episode_title(episode_title)
         return show_name, season_number, episode_number, episode_title
     except Exception as e:
-        logger.error(f"Error extracting metadata from {video_path}: {e}")
+        log_message.error("Error extracting metadata from {video_path}: {e}")
         # Fallback to filename parsing
         return extract_from_filename(video_path.name)
