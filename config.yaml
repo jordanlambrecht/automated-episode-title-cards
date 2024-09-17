@@ -1,9 +1,17 @@
+global_options:
+  aspect_ratio: 16x9 # Either 16x9 or 4x3
 logging:
   log_file: "screenshot_maker_log.log"
-  max_log_size: 5242880 # 5 MB in bytes
+  max_log_size: 10240 # Size in KB
   backup_count: 5
   console_log_level: "INFO"
   log_file_log_level: "DEBUG"
 
-features:
+grammar:
   check_grammar: true
+  manually_confirm_grammar_corrections: true
+
+text_overlays:
+  add_gradient: true
+  prefer_strong_gradient: false
+  default_font_size: l # Choose from: s(mall), m(edium), l(arge), xl(extra-large)
